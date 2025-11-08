@@ -1,4 +1,3 @@
-openai
 openrouter
 google-generativeai
 requests

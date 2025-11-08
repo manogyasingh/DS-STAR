@@ -438,25 +438,3 @@ class DSSTAR:
             "execution_results", []
         )
         return final_code, final_plan, execution_results
-
-
-from llm_clients import GeminiClient as LLMClient
-
-if __name__ == "__main__":
-    llm_client = LLMClient(max_tokens=1000000)  # Increased from default 1000 to handle longer outputs
-    ds_star = DSSTAR(
-        llm_client=llm_client,
-        max_refinement_rounds=10,
-        max_debug_attempts=3,
-    )
-
-    query = "Your data science query here"
-    data_files = ["data/file1.csv", "data/file2.json"]
-
-    final_code, plan, results = ds_star.solve(query, data_files)
-
-    print("\nFinal Solution Code:")
-    print(final_code)
-    print("\nFinal Plan:")
-    for i, step in enumerate(plan):
-        print(f"{i}. {step}")
