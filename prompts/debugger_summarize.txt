@@ -1,0 +1,6 @@
+# Error report
+{error_traceback}
+
+# Your task
+- Remove all unnecessary parts of the above error report.
+- We are now running the Python script. Do not remove where the error occurred.

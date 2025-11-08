@@ -1,0 +1,8 @@
+openai
+openrouter
+google-generativeai
+requests
+numpy
+langgraph
+langchain-core
+dotenv
