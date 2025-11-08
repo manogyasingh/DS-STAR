@@ -36,24 +36,46 @@ def print_section(title: str) -> None:
     print_rule("-")
 
 
-def prompt_query() -> str:
-    print_section("Describe Your Query")
+def prompt_query() -> tuple[str, str]:
+    print_section("Select Query File")
     print(
-        "Fill in the details of the data science question or task you want DS-STAR "
-        "to solve.\nEnter multiple lines if needed; submit an empty line to finish."
+        "Provide the path to a text file containing the data science question or "
+        "task you want DS-STAR to solve."
     )
 
-    lines: list[str] = []
     while True:
-        line = safe_input("query> ")
-        if not line.strip():
-            if lines:
-                break
-            print("Please provide at least one line describing your query.")
+        entry = safe_input("query file> ").strip()
+        if not entry:
+            print("Please provide a file path.")
             continue
-        lines.append(line)
 
-    return "\n".join(lines).strip()
+        command = entry.lower()
+        if command in {"q", "quit"}:
+            print("Aborting. Goodbye!")
+            sys.exit(0)
+
+        candidate = Path(entry).expanduser()
+        if not candidate.exists():
+            print(f"  ! File not found: {candidate}")
+            continue
+        if not candidate.is_file():
+            print(f"  ! Path is not a file: {candidate}")
+            continue
+
+        try:
+            content = candidate.read_text(encoding="utf-8")
+        except OSError as err:
+            print(f"  ! Unable to read file: {err}")
+            continue
+
+        query = content.strip()
+        if not query:
+            print("  ! Query file is empty. Please provide a file with content.")
+            continue
+
+        resolved_path = str(candidate.resolve())
+        print(f"  ✓ Loaded {resolved_path}")
+        return query, resolved_path
 
 
 def prompt_data_files() -> list[str]:
@@ -101,8 +123,11 @@ def prompt_data_files() -> list[str]:
     return files
 
 
-def confirm_inputs(query: str, data_files: list[str]) -> bool:
+def confirm_inputs(query: str, data_files: list[str], query_file: str) -> bool:
     print_section("Review Inputs")
+    print("Query file:")
+    print(indent(query_file, "  "))
+
     print("Query:")
     print(indent(query, "  "))
 
@@ -129,9 +154,9 @@ def confirm_inputs(query: str, data_files: list[str]) -> bool:
 
 def collect_user_inputs() -> tuple[str, list[str]]:
     while True:
-        query = prompt_query()
+        query, query_file = prompt_query()
         data_files = prompt_data_files()
-        if confirm_inputs(query, data_files):
+        if confirm_inputs(query, data_files, query_file):
             return query, data_files
         print("\nLet's try that again.\n")
 

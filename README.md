@@ -104,6 +104,14 @@ The reference implementation in `ds_star.py` encodes Algorithm 1 as a LangGraph 
 
 Each agent lives in its own module under `ds_star_agents/`, enabling independent prompt management and easier customization. Shared formatting helpers and prompt-loading utilities are provided in `ds_star_core/utils.py`. The resulting graph loops through the `execute → verify → router → planner_next → coder_next` cycle until the verifier accepts the plan or the maximum number of refinement rounds is exceeded, at which point the final plan, script, and execution log are returned.
 
+## Implementation Notes
+
+- The coordinator in `ds_star.py` builds every agent instance through `AgentBundle`, mirroring the roles defined in Section 3 of the paper.
+- Analyzer scripts are produced and debugged by `AnalyzerService`, which executes each script and retries with traceback-guided fixes, aligning with Equation (29).
+- Iterative execution uses `SolutionExecutionService`, `PlanningService`, and `CodingService` so that the `execute → verify → router` loop matches Algorithm&nbsp;1 exactly.
+- Router decisions expect either the literal token `Add Step` or an integer `l`; when an integer is returned, the plan is truncated to `{p_0, …, p_{l-1}}` before generating a new step, as described in Section 3.2.
+- The verifier response is interpreted strictly using the `sufficient` / `insufficient` vocabulary specified in the paper, ensuring the graph halts precisely when the spec dictates.
+
 ---
 
 ## Algorithm 1: DS-STAR

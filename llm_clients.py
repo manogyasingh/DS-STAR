@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_GEMINI_MAX_OUTPUT_TOKENS = 8192
+DEFAULT_GEMINI_MAX_OUTPUT_TOKENS = 1000000
 
 
 class BaseLLMClient:
