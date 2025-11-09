@@ -3,6 +3,8 @@ from pathlib import Path
 from textwrap import indent
 
 from ds_star import DSSTAR
+from ds_star_core.logging_config import get_activity_tracker
+from ds_star_core.tui import ActivitySummary, StatusLine, print_recent_activities
 from llm_clients import GeminiClient as LLMClient
 
 CONSOLE_WIDTH = 72
@@ -161,15 +163,74 @@ def collect_user_inputs() -> tuple[str, list[str]]:
         print("\nLet's try that again.\n")
 
 
+def prompt_logging_preferences() -> tuple[str, str | None, bool]:
+    """Prompt user for logging preferences."""
+    print_section("Logging Options")
+    print("Configure logging and real-time activity tracking.\n")
+
+    # Log level
+    print("Log level options: DEBUG, INFO, WARNING, ERROR")
+    log_level = safe_input("Log level [INFO]: ").strip().upper() or "INFO"
+    if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        print(f"  ! Invalid log level '{log_level}', using INFO")
+        log_level = "INFO"
+
+    # Log file
+    print("\nSave logs to file? (optional)")
+    log_file = safe_input("Log file path (or press Enter to skip): ").strip() or None
+
+    # Real-time display
+    print("\nDisplay real-time agent activity?")
+    response = safe_input("Enable real-time display? [Y/n]: ").strip().lower()
+    real_time = response in {"", "y", "yes"}
+
+    return log_level, log_file, real_time
+
+
+def display_progress_update(iteration: int = 0):
+    """Display a progress update during execution."""
+    tracker = get_activity_tracker()
+    status = tracker.get_current_status()
+
+    if status.get("current_node"):
+        node_name = status["current_node"]
+        agent_name = status.get("current_agent", "")
+
+        if agent_name:
+            print(f"  [{iteration}] {node_name} → {agent_name}")
+        else:
+            print(f"  [{iteration}] {node_name}")
+
+        sys.stdout.flush()
+
+
 def main() -> None:
     llm_client = LLMClient(max_tokens=1000000)
+
+    print_banner()
+
+    # Prompt for logging preferences
+    try:
+        log_level, log_file, real_time_display = prompt_logging_preferences()
+    except KeyboardInterrupt:
+        print("\nSession interrupted. Goodbye!")
+        sys.exit(0)
+
+    # Initialize DS-STAR with logging
     ds_star = DSSTAR(
         llm_client=llm_client,
         max_refinement_rounds=10,
         max_debug_attempts=3,
+        log_level=log_level,
+        log_file=log_file,
+        enable_logging=True,
+        verbose=real_time_display,
     )
 
-    print_banner()
+    # Get activity tracker
+    tracker = get_activity_tracker()
+    tracker.reset()  # Clear any previous activities
+
     try:
         query, data_files = collect_user_inputs()
     except KeyboardInterrupt:
@@ -177,10 +238,17 @@ def main() -> None:
         sys.exit(0)
 
     print_section("Solving")
-    print("Submitting your request to DS-STAR... please wait.\n")
+    print("Submitting your request to DS-STAR...")
 
+    if real_time_display:
+        print("\n📊 Real-time activity tracking enabled")
+        print("Watch agent activities below:\n")
+
+    # Execute the solution
     final_code, plan, results = ds_star.solve(query, data_files)
 
+    # Display results
+    print()
     print_section("Final Solution Code")
     print(final_code or "(no code returned)")
 
@@ -194,6 +262,17 @@ def main() -> None:
     if results:
         print_section("Results")
         print(results)
+
+    # Display execution summary
+    if real_time_display:
+        summary = ActivitySummary()
+        summary.print_summary()
+
+    # Offer to show recent activities
+    print()
+    response = safe_input("View detailed activity log? [y/N]: ").strip().lower()
+    if response in {"y", "yes"}:
+        print_recent_activities(n=50)
 
 
 if __name__ == "__main__":

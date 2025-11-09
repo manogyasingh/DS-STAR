@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from ds_star_agents import AgentBundle
 from ds_star_core import format_data_info, format_plan_steps, load_prompts
 from ds_star_core.execution import PythonScriptRunner
+from ds_star_core.logging_config import LogLevel, setup_logging
 from ds_star_core.models import DSStarState, DataDescription, ExecutionResult, VerificationResult
 from ds_star_core.services import (
     AnalyzerService,
@@ -34,6 +35,9 @@ class DSSTAR:
         top_k_files: int = 10,
         prompts_dir: str = "prompts",
         verbose: bool = True,
+        log_level: str = "INFO",
+        log_file: Optional[str] = None,
+        enable_logging: bool = True,
     ):
         self.llm_client = llm_client
         self.max_refinement_rounds = max_refinement_rounds
@@ -43,11 +47,23 @@ class DSSTAR:
         self.prompts_dir = prompts_dir
         self.verbose = verbose
 
+        # Set up logging
+        self.enable_logging = enable_logging
+        if enable_logging:
+            log_level_enum = getattr(LogLevel, log_level.upper(), LogLevel.INFO)
+            self.logger = setup_logging(
+                log_level=log_level_enum,
+                log_file=log_file,
+                console_output=verbose,
+            )
+        else:
+            self.logger = None
+
         self.prompts = load_prompts(prompts_dir)
 
-        self.agents = AgentBundle.create(llm_client, self.prompts)
+        self.agents = AgentBundle.create(llm_client, self.prompts, logger=self.logger)
 
-        self.script_runner = PythonScriptRunner()
+        self.script_runner = PythonScriptRunner(logger=self.logger)
 
         self.analyzer_service = AnalyzerService(
             analyzer=self.agents.analyzer,
@@ -121,6 +137,9 @@ class DSSTAR:
 
     def _node_analyze(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Analyzing data files...")
+        if self.logger:
+            self.logger.state_transition("analyze", details={"data_files": len(state.get("data_files", []))})
+
         data_files = state.get("data_files", [])
         query = state.get("query", "")
         data_descriptions = self.analyzer_service.analyze_files(data_files, query)
@@ -128,20 +147,29 @@ class DSSTAR:
 
     def _node_planner_initial(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Generating initial plan...")
+        if self.logger:
+            self.logger.state_transition("planner_initial")
+
         data_info = format_data_info(state.get("data_descriptions", []))
         plan = self.planning_service.generate_initial_plan(state["query"], data_info)
         return {"plan": plan}
 
     def _node_coder_initial(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Implementing initial plan...")
+        if self.logger:
+            self.logger.state_transition("coder_initial")
+
         data_info = format_data_info(state.get("data_descriptions", []))
         code = self.coding_service.generate_initial_code(state["plan"][0], data_info)
         return {"code": code, "execution_results": []}
 
     def _node_execute(self, state: DSStarState) -> Dict[str, Any]:
+        self._log("Executing solution code...")
+        if self.logger:
+            self.logger.state_transition("execute", details={"iteration": state.get("iteration", 0)})
+
         data_info = format_data_info(state.get("data_descriptions", []))
         code_in = state.get("code", "")
-        self._log("Executing solution code...")
         code, exec_result = self.execution_service.execute(code_in, data_info)
         execution_results = list(state.get("execution_results", []))
         execution_results.append(self._execution_observation(exec_result))
@@ -153,6 +181,9 @@ class DSSTAR:
 
     def _node_verify(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Verifying plan sufficiency...")
+        if self.logger:
+            self.logger.state_transition("verify", details={"iteration": state.get("iteration", 0)})
+
         plan_steps = format_plan_steps(state.get("plan", []))
         result_text = self._execution_observation(state.get("last_execution"))
         outcome: VerificationOutcome = self.verification_service.evaluate(
@@ -165,6 +196,9 @@ class DSSTAR:
         iteration = state.get("iteration", 0)
         if verification == VerificationResult.INSUFFICIENT:
             iteration += 1
+            if self.logger:
+                from ds_star_core.logging_config import get_activity_tracker
+                get_activity_tracker().increment_iteration()
 
         updates: Dict[str, Any] = {
             "verification": verification,
@@ -174,8 +208,12 @@ class DSSTAR:
 
         if verification == VerificationResult.SUFFICIENT:
             updates["finalization_reason"] = "verified"
+            if self.logger:
+                self.logger.info(f"Verification SUFFICIENT after {iteration} iterations")
         elif iteration >= self.max_refinement_rounds:
             updates["finalization_reason"] = "max_rounds"
+            if self.logger:
+                self.logger.info(f"Max refinement rounds reached: {iteration}/{self.max_refinement_rounds}")
 
         return updates
 
@@ -189,6 +227,9 @@ class DSSTAR:
 
     def _node_router(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Routing next action...")
+        if self.logger:
+            self.logger.state_transition("router")
+
         plan_steps = format_plan_steps(state.get("plan", []))
         last_result = self._execution_observation(state.get("last_execution"))
         data_info = format_data_info(state.get("data_descriptions", []))
@@ -199,14 +240,19 @@ class DSSTAR:
             data_info=data_info,
             num_steps=len(state.get("plan", [])),
         )
+        if self.logger:
+            self.logger.info(f"Router decision: {decision}")
         return {"router_decision": decision}
 
     def _node_planner_next(self, state: DSStarState) -> Dict[str, Any]:
+        self._log("Generating next plan step...")
+        if self.logger:
+            self.logger.state_transition("planner_next", details={"iteration": state.get("iteration", 0)})
+
         plan = self.planning_service.truncate_plan(
             state.get("plan", []),
             state.get("router_decision", "Add Step"),
         )
-        self._log("Generating next plan step...")
         data_info = format_data_info(state.get("data_descriptions", []))
         last_result = self._execution_observation(state.get("last_execution"))
         next_step = self.planning_service.generate_next_step(
@@ -220,6 +266,9 @@ class DSSTAR:
 
     def _node_coder_next(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Implementing updated plan...")
+        if self.logger:
+            self.logger.state_transition("coder_next", details={"iteration": state.get("iteration", 0)})
+
         data_info = format_data_info(state.get("data_descriptions", []))
         plan = list(state.get("plan", []))
         previous_code = state.get("code", "")
@@ -233,6 +282,12 @@ class DSSTAR:
 
     def _node_finalize(self, state: DSStarState) -> Dict[str, Any]:
         self._log("Finalizing solution...")
+        if self.logger:
+            self.logger.state_transition("finalize", details={
+                "reason": state.get("finalization_reason", "verified"),
+                "iterations": state.get("iteration", 0)
+            })
+
         data_info = format_data_info(state.get("data_descriptions", []))
         code = state.get("code", "")
         result_text = self._execution_observation(state.get("last_execution"))

@@ -29,28 +29,31 @@ class AgentBundle:
     finalyzer: FinalyzerAgent
 
     @classmethod
-    def create(cls, llm_client: Any, prompts: Dict[str, str]) -> "AgentBundle":
+    def create(cls, llm_client: Any, prompts: Dict[str, str], logger=None) -> "AgentBundle":
         return cls(
-            analyzer=AnalyzerAgent(llm_client, prompts.get("analyzer", "")),
+            analyzer=AnalyzerAgent(llm_client, prompts.get("analyzer", ""), logger=logger),
             planner=PlannerAgent(
                 llm_client,
                 initial_prompt=prompts.get("planner_initial", ""),
                 next_prompt=prompts.get("planner_next", ""),
+                logger=logger,
             ),
             coder=CoderAgent(
                 llm_client,
                 initial_prompt=prompts.get("coder_initial", ""),
                 next_prompt=prompts.get("coder_next", ""),
+                logger=logger,
             ),
-            verifier=VerifierAgent(llm_client, prompts.get("verifier", "")),
-            router=RouterAgent(llm_client, prompts.get("router", "")),
-            analyzer_debugger=AnalyzerDebuggerAgent(llm_client, prompts.get("debugger_analyzer", "")),
-            solution_debugger=SolutionDebuggerAgent(llm_client, prompts.get("debugger_solution", "")),
+            verifier=VerifierAgent(llm_client, prompts.get("verifier", ""), logger=logger),
+            router=RouterAgent(llm_client, prompts.get("router", ""), logger=logger),
+            analyzer_debugger=AnalyzerDebuggerAgent(llm_client, prompts.get("debugger_analyzer", ""), logger=logger),
+            solution_debugger=SolutionDebuggerAgent(llm_client, prompts.get("debugger_solution", ""), logger=logger),
             traceback_summarizer=TracebackSummarizerAgent(
                 llm_client,
                 prompts.get("debugger_summarize", ""),
+                logger=logger,
             ),
-            finalyzer=FinalyzerAgent(llm_client, prompts.get("finalyzer", "")),
+            finalyzer=FinalyzerAgent(llm_client, prompts.get("finalyzer", ""), logger=logger),
         )
 
     def update_prompt(self, agent_name: str, prompt: str) -> None:
