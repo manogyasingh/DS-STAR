@@ -21,8 +21,9 @@ class ExecutionSettings:
 class PythonScriptRunner:
     """Utility that executes ad-hoc Python scripts within a temporary file."""
 
-    def __init__(self, settings: Optional[ExecutionSettings] = None):
+    def __init__(self, settings: Optional[ExecutionSettings] = None, logger=None):
         self._settings = settings or ExecutionSettings()
+        self.logger = logger
 
     def run(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
         """
@@ -38,6 +39,12 @@ class PythonScriptRunner:
         """
         effective_timeout = timeout or self._settings.timeout
 
+        if self.logger:
+            self.logger.execution_start(details={
+                "code_length": len(code),
+                "timeout": effective_timeout
+            })
+
         try:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as handle:
                 handle.write(code)
@@ -52,17 +59,33 @@ class PythonScriptRunner:
                 )
 
                 if result.returncode == 0:
-                    return ExecutionResult(success=True, output=result.stdout)
+                    exec_result = ExecutionResult(success=True, output=result.stdout)
+                    if self.logger:
+                        self.logger.execution_end(True, details={
+                            "output_length": len(result.stdout),
+                            "return_code": result.returncode
+                        })
+                    return exec_result
 
-                return ExecutionResult(
+                exec_result = ExecutionResult(
                     success=False,
                     output=result.stdout,
                     error=result.stderr,
                     traceback=result.stderr,
                 )
+                if self.logger:
+                    self.logger.execution_end(False, details={
+                        "error": result.stderr[:200],
+                        "return_code": result.returncode
+                    })
+                return exec_result
             finally:
                 os.unlink(temp_file)
         except subprocess.TimeoutExpired:
+            if self.logger:
+                self.logger.error(f"Execution timeout after {effective_timeout}s", details={
+                    "timeout": effective_timeout
+                })
             return ExecutionResult(
                 success=False,
                 output="",
@@ -70,6 +93,11 @@ class PythonScriptRunner:
                 traceback="Script execution exceeded timeout limit",
             )
         except Exception as exc:  # pylint: disable=broad-except
+            if self.logger:
+                self.logger.error(f"Execution error: {str(exc)}", details={
+                    "exception": str(exc),
+                    "traceback": traceback.format_exc()
+                })
             return ExecutionResult(
                 success=False,
                 output="",
